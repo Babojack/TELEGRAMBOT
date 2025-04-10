@@ -15,7 +15,7 @@ GROUP_ID = -1002322472598
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Список слов (пример)
+# Списоfк слов (пример)
 words = [
    {
         "ru": "дом",
