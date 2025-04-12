@@ -1,0 +1,39 @@
+Собака: der Hund
+Кошка: die Katze
+Книга: das Buch
+Дом: das Haus
+Девочка: das Mädchen
+Мальчик: der Junge
+Девушка: die Frau
+Окно: das Fenster
+Дверь: die Tür
+Компьютер: der Computer
+Телефон: das Telefon
+Вода: das Wasser
+Стол: der Tisch
+Стул: der Stuhl
+Солнце: die Sonne
+Луна: der Mond
+Город: die Stadt
+Улица: die Straße
+Ручка: der Stift
+Огонь: das Feuer
+Море: das Meer
+Любовь: die Liebe
+Цветок: die Blume
+Животное: das Tier
+идти: gehen
+приходить: kommen
+жить: wohnen
+работать: arbeiten
+говорить: sprechen
+пить: trinken
+есть: essen
+видеть: sehen
+любить: lieben
+читать: lesen
+писать: schreiben
+слушать: hören
+думать: denken
+знать: wissen
+учиться: lernen
