@@ -108,6 +108,14 @@ function parseGermanWord(ger) {
 }
 
 ////////////////////////////////////////////////////////////
+// Функция нормализации строки (удаляет лишние пробелы и приводит к нижнему регистру)
+////////////////////////////////////////////////////////////
+
+function normalize(str) {
+  return str.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+////////////////////////////////////////////////////////////
 // Функция автостарта нового раунда в конкретной группе
 ////////////////////////////////////////////////////////////
 
@@ -230,7 +238,7 @@ bot.command('endgame', (ctx) => {
   ctx.reply("Игра остановлена.");
 });
 
-// Команда для просмотра личного счета
+// Команда для просмотра личного счёта
 bot.command('score', (ctx) => {
   const userId = ctx.from.id;
   const userData = pointsData[userId];
@@ -302,12 +310,12 @@ bot.on('text', (ctx) => {
   // Если нет активного раунда в этой группе, сообщения не обрабатываются
   if (!game.roundActive) return;
 
-  const text = ctx.message.text.trim();
+  const text = ctx.message.text;
   const userId = ctx.from.id;
   const username = ctx.from.first_name || "Неизвестный";
 
-  // 1) Команда /Aufgabe+
-  if (text === "Aufgabe+") {
+  // 1) Команда "Aufgabe+"
+  if (text.trim() === "Aufgabe+") {
     if (!game.aufgabeClaimed[userId]) {
       updateUserPoints(userId, username, 3);
       game.aufgabeClaimed[userId] = true;
@@ -318,10 +326,11 @@ bot.on('text', (ctx) => {
 
   // 2) Проверка перевода слова
   if (!game.firstGuesser) {
-    let userGuess = text.toLowerCase();
-
+    // Используем normalize() для приведения ответа к стандартному виду
+    let userGuess = normalize(text);
     if (game.currentParsedGer?.hasArticle) {
-      const expected = (game.currentParsedGer.article + " " + game.currentParsedGer.root).toLowerCase();
+      // Ожидаемый ответ формируется и нормализуется
+      const expected = normalize(`${game.currentParsedGer.article} ${game.currentParsedGer.root}`);
       if (userGuess === expected) {
         game.firstGuesser = { userId, username };
         updateUserPoints(userId, username, 1);
@@ -332,8 +341,8 @@ bot.on('text', (ctx) => {
         return;
       }
     } else {
-      const rootLower = (game.currentParsedGer?.root || "").toLowerCase();
-      if (userGuess === rootLower) {
+      const expected = normalize(game.currentParsedGer.root);
+      if (userGuess === expected) {
         game.firstGuesser = { userId, username };
         updateUserPoints(userId, username, 1);
         ctx.reply(`Отлично, ${username}! Ты первый и получаешь +1 балл.`);
@@ -345,12 +354,12 @@ bot.on('text', (ctx) => {
     }
   } else {
     // Если слово уже угадано, повторные попытки
-    let userGuess = text.toLowerCase();
+    let userGuess = normalize(text);
     let expected;
     if (game.currentParsedGer?.hasArticle) {
-      expected = (game.currentParsedGer.article + " " + game.currentParsedGer.root).toLowerCase();
+      expected = normalize(`${game.currentParsedGer.article} ${game.currentParsedGer.root}`);
     } else {
-      expected = (game.currentParsedGer?.root || "").toLowerCase();
+      expected = normalize(game.currentParsedGer.root || "");
     }
     if (userGuess === expected) {
       ctx.reply(`Увы, ${game.firstGuesser.username} уже угадал первым! 😉`);
@@ -370,8 +379,8 @@ bot.on('text', (ctx) => {
     return;
   }
 
-  const userSentenceLower = text.toLowerCase();
-  const rootLower = (game.currentParsedGer?.root || "").toLowerCase();
+  const userSentenceLower = text.toLowerCase(); // здесь можно оставить простой toLowerCase(), так как мы ищем вхождение
+  const rootLower = game.currentParsedGer?.root.toLowerCase() || "";
   if (!userSentenceLower.includes(rootLower)) {
     ctx.reply("Почти! Правильно ли написано слово?");
     return;
