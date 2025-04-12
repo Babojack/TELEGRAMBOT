@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////
-// bot.js – Multi-Gruppen-Version
+// bot.js – Много-групповая версия с автообновлением раундов
 ////////////////////////////////////////////////////////////
 
 import 'dotenv/config';
@@ -9,7 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 ////////////////////////////////////////////////////////////
-// Pfad/Variablen-Setup
+// Настройка путей и переменных
 ////////////////////////////////////////////////////////////
 
 const __filename = fileURLToPath(import.meta.url);
@@ -17,19 +17,16 @@ const __dirname = path.dirname(__filename);
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) {
-  console.error("Fehler: BOT_TOKEN wurde nicht in der .env-Datei gefunden!");
+  console.error("Ошибка: BOT_TOKEN не найден в .env файле!");
   process.exit(1);
 }
 
 const ADMIN_ID = process.env.ADMIN_ID || null;
 
-// KEINE feste GROUP_ID mehr, weil wir ja in vielen Gruppen aktiv sein wollen
-// Wenn du trotzdem bestimmte Gruppen beschränken willst, musst du das manuell regeln.
-
 const bot = new Telegraf(BOT_TOKEN);
 
 ////////////////////////////////////////////////////////////
-// Wörter einlesen (gleich für alle Gruppen)
+// Чтение файла со словами (один и тот же для всех групп)
 ////////////////////////////////////////////////////////////
 
 let words = [];
@@ -46,12 +43,12 @@ try {
       };
     });
 } catch (err) {
-  console.error("Fehler beim Lesen der words.txt:", err);
+  console.error("Ошибка при чтении файла words.txt:", err);
   process.exit(1);
 }
 
 ////////////////////////////////////////////////////////////
-// Punkte – global für alle User (optional)
+// Глобальные баллы для всех пользователей (опционально)
 ////////////////////////////////////////////////////////////
 
 const pointsFile = path.join(__dirname, 'points.json');
@@ -60,7 +57,7 @@ if (fs.existsSync(pointsFile)) {
   try {
     pointsData = JSON.parse(fs.readFileSync(pointsFile, 'utf8'));
   } catch (err) {
-    console.error("Fehler beim Lesen der points.json:", err);
+    console.error("Ошибка при чтении файла points.json:", err);
   }
 }
 
@@ -77,28 +74,28 @@ function savePoints() {
 }
 
 ////////////////////////////////////////////////////////////
-// SPIELZUSTAND pro Gruppe in einem games-Objekt
+// Состояние игры для каждой группы (с добавлением авто-таймера)
 ////////////////////////////////////////////////////////////
 
-const games = {}; // games[chatId] => { roundActive, currentWord, ... }
+const games = {}; // games[chatId] => { roundActive, currentWord, autoInterval, ... }
 
 function ensureGame(chatId) {
-  // Falls kein Eintrag existiert, anlegen
   if (!games[chatId]) {
     games[chatId] = {
       roundActive: false,
       currentWord: null,
       currentParsedGer: null,
       firstGuesser: null,
-      sentenceSubmissions: {}, // wer hat schon Sätze geschrieben
-      aufgabeClaimed: {},      // wer hat schon Aufgabe+ benutzt
-      wordIndex: 0
+      sentenceSubmissions: {},
+      aufgabeClaimed: {},
+      wordIndex: 0,
+      autoInterval: null // Таймер для автоматического запуска раундов в этой группе
     };
   }
   return games[chatId];
 }
 
-// Artikel-Parser:
+// Функция для разбора немецкого слова и его артикля
 function parseGermanWord(ger) {
   const lower = ger.toLowerCase();
   if (lower.startsWith('der ') || lower.startsWith('die ') || lower.startsWith('das ')) {
@@ -111,38 +108,16 @@ function parseGermanWord(ger) {
 }
 
 ////////////////////////////////////////////////////////////
-// Automodus (global)
+// Функция автостарта нового раунда в конкретной группе
 ////////////////////////////////////////////////////////////
 
-let autoMode = false;
-let autoInterval = null;
-
-function startAutoMode() {
-  if (autoInterval) clearInterval(autoInterval);
-  autoMode = true;
-  autoInterval = setInterval(() => {
-    // Alle Gruppen durchgehen, in denen NICHT gerade eine Runde läuft
-    for (const chatId of Object.keys(games)) {
-      const game = games[chatId];
-      if (!game.roundActive && autoMode) {
-        console.log(`Auto-Modus: Starte automatisch eine neue Runde in Chat ${chatId}...`);
-        autoStartGame(chatId);
-      }
-    }
-  }, 60 * 60 * 1000);
-}
-
-function stopAutoMode() {
-  autoMode = false;
-  if (autoInterval) {
-    clearInterval(autoInterval);
-    autoInterval = null;
-  }
-}
-
-// Startet das Spiel in einem bestimmten chatId
 function autoStartGame(chatId) {
   const game = ensureGame(chatId);
+
+  // Если раунд уже активен, сообщаем об окончании старого слова
+  if (game.roundActive) {
+    bot.telegram.sendMessage(chatId, "Время для текущего слова истекло. Переходим к следующему слову.");
+  }
 
   if (game.wordIndex >= words.length) {
     game.wordIndex = 0;
@@ -157,48 +132,50 @@ function autoStartGame(chatId) {
   game.sentenceSubmissions = {};
   game.aufgabeClaimed = {};
 
+  // Объявление нового раунда
   bot.telegram.sendMessage(
     chatId,
-    "So ihr Lieben! In den nächsten 24 Stunden bekommt ihr 24 Wörter, die ihr heute lernen werdet. " +
-    "Aber ihr könnt dabei auch Punkte sammeln.\n\n" +
-    "1️⃣ Der erste, der das Wort errät, bekommt +1 Punkt.\n" +
-    "2️⃣ Ihr könnt danach – unabhängig davon, wer der Erste war – einen Satz mit dem Wort bilden und dafür +2 Punkte kriegen.\n" +
-    "3️⃣ Tagesaufgabe: Falls ihr 'Aufgabe+' schreibt, bekommt ihr +3 Punkte.\n\n" +
-    "Viel Erfolg und viel Spaß!"
+    "Новое слово!\n\n" +
+    "В течение следующих 24 часов вы получите 24 слова для изучения. " +
+    "Первый, кто правильно переведёт слово, получит +1 балл, а за составление правильного предложения – +2 балла.\n\n" +
+    "Удачи!"
   );
 
   bot.telegram.sendMessage(
     chatId,
-    `⚡️ *Neue Runde!*\n` +
-    `📝 Das Wort auf Russisch: *${game.currentWord.rus}*\n` +
-    `\nBitte übersetzt dieses Wort ins Deutsche! 🚀`,
+    `⚡️ *Новый раунд!*\n` +
+    `📝 Слово на русском: *${game.currentWord.rus}*\n` +
+    `\nПожалуйста, переведите это слово на немецкий! 🚀`,
     { parse_mode: 'Markdown' }
   );
 }
 
 ////////////////////////////////////////////////////////////
-// Befehle /startgame etc.
+// Команды бота
 ////////////////////////////////////////////////////////////
 
+// Запуск игры. После вызова /startgame в группе, будет запущен новый раунд
+// и настроен таймер, который раз в час будет автоматически отправлять новое слово.
 bot.command('startgame', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
 
-  // Optional: nur Admin darf starten
+  // Опционально: ограничение команды для админа
   if (ADMIN_ID && ctx.from.id.toString() !== ADMIN_ID.toString()) {
-    ctx.reply("Nur der Admin darf das Spiel starten.");
+    ctx.reply("Только админ может запускать игру.");
     return;
   }
 
-  if (game.roundActive) {
-    ctx.reply("Es läuft bereits eine Runde!");
-    return;
+  // Если уже был запущен авто-таймер для этой группы, сбрасываем его
+  if (game.autoInterval) {
+    clearInterval(game.autoInterval);
+    game.autoInterval = null;
   }
 
+  // Запуск нового раунда
   if (game.wordIndex >= words.length) {
     game.wordIndex = 0;
   }
-
   game.currentWord = words[game.wordIndex];
   game.wordIndex++;
   game.currentParsedGer = parseGermanWord(game.currentWord.ger);
@@ -209,57 +186,38 @@ bot.command('startgame', (ctx) => {
   game.aufgabeClaimed = {};
 
   ctx.reply(
-    "So ihr Lieben! In den nächsten 24 Stunden bekommt ihr 24 Wörter, die ihr heute lernen werdet. " +
-"Aber ihr könnt dabei auch Punkte sammeln.\n\n" +
-"1️⃣ Der Erste, der das Wort richtig übersetzt, bekommt +1 Punkt.\n" +
-"2️⃣ Danach könnt ihr – alle unabhängig voneinander – einen richtigen Satz mit dem Wort bilden und dafür +2 Punkte bekommen.\n" +
-"3️⃣ Wenn ihr 'Aufgabe+' schreibt, bekommt ihr +3 Punkte (dafür müsst ihr das Wort 4x in echten Gesprächen und 4x schriftlich benutzen!).\n\n" +
-"📌 WICHTIG: Beim Schreiben eurer Sätze bitte auf die Grammatik achten!\n" +
-"Hier sind ein paar goldene Regeln, die euch helfen:\n\n" +
-
-"📚 DIE GOLDENEN GRAMMATIK-REGELN:\n" +
-"➤ Immer den richtigen Artikel benutzen! Beispiel:\n" +
-"   ✘ Haus (falsch!)\n" +
-"   ✔ das Haus (richtig!)\n\n" +
-
-"➤ Manche Präpositionen verlangen bestimmte Fälle:\n" +
-"   • mit → Dativ → z. B. „mit dem Auto“, „mit der Sonne“\n" +
-"   • für → Akkusativ → z. B. „für das Kind“, „für die Katze“\n" +
-"   • von → Dativ → „von dem Mann“, „von der Frau“\n" +
-"   • ohne → Akkusativ → „ohne einen Plan“, „ohne die Jacke“\n\n" +
-
-"➤ Ein Satz sollte mindestens 5 Wörter haben!\n" +
-"   ✘ 'Ich liebe Haus' (zu kurz & grammatikalisch falsch)\n" +
-"   ✔ 'Ich liebe das Haus in unserer Straße.'\n\n" +
-
-"➤ Großschreibung! Alle Nomen im Deutschen schreibt man groß:\n" +
-"   ✔ „Ich habe einen Hund.“ (nicht: „einen hund“)\n\n" +
-
-"🧠 Denk dran: Dein Ziel ist nicht nur Punkte zu sammeln – sondern am Ende richtiges, echtes Deutsch zu sprechen 💪\n\n" +
-"Viel Erfolg und viel Spaß beim Deutschlernen! 🇩🇪✨"
+    "В течение следующих 24 часов вы будете получать 24 слова для изучения языка. " +
+    "Правильный перевод слова даёт +1 балл, а составление корректного предложения – +2 балла. " +
+    "При вводе 'Aufgabe+' вы получаете +3 балла.\n\n" +
+    "Удачи!"
   );
 
   ctx.reply(
-    `⚡️ *Neue Runde!*\n` +
-    `📝 Das Wort auf Russisch: *${game.currentWord.rus}*\n` +
-    `\nBitte übersetzt dieses Wort ins Deutsche! 🚀`,
+    `⚡️ *Новый раунд!*\n` +
+    `📝 Слово на русском: *${game.currentWord.rus}*\n` +
+    `\nПожалуйста, переведите это слово на немецкий! 🚀`,
     { parse_mode: 'Markdown' }
   );
+
+  // Устанавливаем авто-таймер для запуска нового слова каждые 60 минут
+  game.autoInterval = setInterval(() => {
+    autoStartGame(chatId);
+  }, 60 * 60 * 1000);
 });
 
-
+// Завершение игры в текущей группе (останавливаем раунд и сбрасываем авто-таймер)
 bot.command('endgame', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
 
   if (ADMIN_ID && ctx.from.id.toString() !== ADMIN_ID.toString()) {
-    ctx.reply("Nur der Admin darf das Spiel beenden.");
+    ctx.reply("Только админ может останавливать игру.");
     return;
   }
 
-  if (!game.roundActive) {
-    ctx.reply("Es läuft aktuell keine Runde.");
-    return;
+  if (game.autoInterval) {
+    clearInterval(game.autoInterval);
+    game.autoInterval = null;
   }
 
   game.roundActive = false;
@@ -269,51 +227,57 @@ bot.command('endgame', (ctx) => {
   game.sentenceSubmissions = {};
   game.aufgabeClaimed = {};
 
-  ctx.reply("Die Runde wurde beendet.");
+  ctx.reply("Игра остановлена.");
 });
 
-
+// Команда для просмотра личного счета
 bot.command('score', (ctx) => {
   const userId = ctx.from.id;
   const userData = pointsData[userId];
   const score = userData ? userData.points : 0;
-  ctx.reply(`${ctx.from.first_name}, dein Punktestand: ${score}`);
+  ctx.reply(`${ctx.from.first_name}, твой счёт: ${score}`);
 });
 
-// Zeigt alle Punkte (global)
+// Вывод общего списка баллов
 bot.command('scoreall', (ctx) => {
   if (Object.keys(pointsData).length === 0) {
-    ctx.reply("Noch keine Punkte vorhanden.");
+    ctx.reply("Пока баллов нет.");
     return;
   }
-  let result = "📊 *Punktestand aller Teilnehmer:*\n\n";
+  let result = "📊 *Счёт всех участников:*\n\n";
   const sorted = Object.entries(pointsData).sort((a, b) => b[1].points - a[1].points);
   sorted.forEach(([id, data], idx) => {
-    result += `${idx + 1}. ${data.username}: ${data.points} Punkte\n`;
+    result += `${idx + 1}. ${data.username}: ${data.points} баллов\n`;
   });
   ctx.reply(result, { parse_mode: 'Markdown' });
 });
 
 bot.command('leaderboard', (ctx) => {
   if (Object.keys(pointsData).length === 0) {
-    ctx.reply("Noch keine Punkte vorhanden.");
+    ctx.reply("Пока баллов нет.");
     return;
   }
-  let leaderboard = "🏆 *Tabelle der Besten:*\n\n";
+  let leaderboard = "🏆 *Лидерборд:*\n\n";
   const sorted = Object.entries(pointsData).sort((a, b) => b[1].points - a[1].points);
   sorted.forEach(([id, data], idx) => {
-    leaderboard += `${idx + 1}. ${data.username}: ${data.points} Punkte\n`;
+    leaderboard += `${idx + 1}. ${data.username}: ${data.points} баллов\n`;
   });
   ctx.reply(leaderboard, { parse_mode: 'Markdown' });
 });
 
+// Перезапуск игры: сбрасывает состояние для группы и останавливает авто-таймер
 bot.command('restartgame', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
 
   if (ADMIN_ID && ctx.from.id.toString() !== ADMIN_ID.toString()) {
-    ctx.reply("Nur der Admin darf das Spiel neu starten.");
+    ctx.reply("Только админ может перезапускать игру.");
     return;
+  }
+
+  if (game.autoInterval) {
+    clearInterval(game.autoInterval);
+    game.autoInterval = null;
   }
 
   game.roundActive = false;
@@ -324,99 +288,63 @@ bot.command('restartgame', (ctx) => {
   game.aufgabeClaimed = {};
   game.wordIndex = 0;
 
-  ctx.reply(
-    "Das Spiel wurde komplett neu gestartet! Die Punkte bleiben jedoch bestehen.\n" +
-    "Starte eine neue Runde mit /startgame."
-  );
-});
-
-// Auto-Modus für ALLE Gruppen
-bot.command('auto_on', (ctx) => {
-  if (ADMIN_ID && ctx.from.id.toString() !== ADMIN_ID.toString()) {
-    ctx.reply("Nur der Admin darf den automatischen Modus einschalten.");
-    return;
-  }
-
-  if (autoMode) {
-    ctx.reply("Der automatische Modus ist bereits aktiviert!");
-    return;
-  }
-
-  startAutoMode();
-  ctx.reply("Okay, ich starte jetzt alle 60 Minuten automatisch eine neue Runde in allen Gruppen (wenn keine läuft).");
-});
-
-bot.command('auto_off', (ctx) => {
-  if (ADMIN_ID && ctx.from.id.toString() !== ADMIN_ID.toString()) {
-    ctx.reply("Nur der Admin darf den automatischen Modus ausschalten.");
-    return;
-  }
-
-  if (!autoMode) {
-    ctx.reply("Der automatische Modus ist momentan nicht aktiv.");
-    return;
-  }
-
-  stopAutoMode();
-  ctx.reply("Alles klar, kein automatisches Starten mehr!");
+  ctx.reply("Игра перезапущена (баллы сохраняются). Запустите новую игру командой /startgame.");
 });
 
 ////////////////////////////////////////////////////////////
-// on('text') – Kernlogik pro Gruppe
+// Обработка текстовых сообщений – основная логика игры
 ////////////////////////////////////////////////////////////
 
 bot.on('text', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
-  
-  if (!game.roundActive) return; // Kein aktives Spiel in dieser Gruppe
+
+  // Если нет активного раунда в этой группе, сообщения не обрабатываются
+  if (!game.roundActive) return;
 
   const text = ctx.message.text.trim();
   const userId = ctx.from.id;
-  const username = ctx.from.first_name || "Unbekannt";
+  const username = ctx.from.first_name || "Неизвестный";
 
-  // 1) /Aufgabe+
+  // 1) Команда /Aufgabe+
   if (text === "Aufgabe+") {
     if (!game.aufgabeClaimed[userId]) {
       updateUserPoints(userId, username, 3);
       game.aufgabeClaimed[userId] = true;
-      ctx.reply(`Perfekt, ${username}! Du bekommst +3 Punkte für Aufgabe+. 🔥`);
+      ctx.reply(`Отлично, ${username}! Ты получаешь +3 балла за Aufgabe+. 🔥`);
     }
     return;
   }
 
-  // 2) Wort erraten?
+  // 2) Проверка перевода слова
   if (!game.firstGuesser) {
-    // Noch keiner hat es erraten
     let userGuess = text.toLowerCase();
 
     if (game.currentParsedGer?.hasArticle) {
       const expected = (game.currentParsedGer.article + " " + game.currentParsedGer.root).toLowerCase();
       if (userGuess === expected) {
-        // Richtig erraten
         game.firstGuesser = { userId, username };
         updateUserPoints(userId, username, 1);
-        ctx.reply(`Sehr gut, ${username}! Du warst der Erste und bekommst +1 Punkt.`);
+        ctx.reply(`Отлично, ${username}! Ты первый и получаешь +1 балл.`);
         return;
       } else {
-        ctx.reply("Fast! Bist du sicher, dass du den Artikel richtig hast (der, die, das)?");
+        ctx.reply("Почти! Проверь, правильно ли указан артикль (der, die, das).");
         return;
       }
     } else {
-      // Kein Artikel
       const rootLower = (game.currentParsedGer?.root || "").toLowerCase();
       if (userGuess === rootLower) {
         game.firstGuesser = { userId, username };
         updateUserPoints(userId, username, 1);
-        ctx.reply(`Sehr gut, ${username}! Du warst der Erste und bekommst +1 Punkt.`);
+        ctx.reply(`Отлично, ${username}! Ты первый и получаешь +1 балл.`);
         return;
       } else {
-        ctx.reply("Fast! Hast du das Wort richtig geschrieben?");
+        ctx.reply("Почти! Правильно ли написано слово?");
         return;
       }
     }
   } else {
-    // firstGuesser != null => Wort schon erraten
+    // Если слово уже угадано, повторные попытки
     let userGuess = text.toLowerCase();
     let expected;
     if (game.currentParsedGer?.hasArticle) {
@@ -425,43 +353,42 @@ bot.on('text', (ctx) => {
       expected = (game.currentParsedGer?.root || "").toLowerCase();
     }
     if (userGuess === expected) {
-      // Jemand versucht das Wort nochmal exakt zu erraten -> zu spät
-      ctx.reply(`Leider zu spät, ${game.firstGuesser.username} war schneller! 😉`);
+      ctx.reply(`Увы, ${game.firstGuesser.username} уже угадал первым! 😉`);
       return;
     }
   }
 
-  // 3) Vorschlag eines Satzes (mind. 5 Wörter, enthält root)
+  // 3) Проверка предложения (минимум 5 слов и наличие ключевого слова)
   if (game.sentenceSubmissions[userId]) {
-    // User hat schon ein Satz gegeben
+    // Пользователь уже отправлял предложение
     return;
   }
 
   const wordsInMessage = text.split(/\s+/).filter(w => w.length > 0);
   if (wordsInMessage.length < 5) {
-    ctx.reply("Dein Satz ist leider zu kurz... Bitte mindestens 5 Wörter verwenden!");
+    ctx.reply("Твоё предложение слишком короткое. Используй минимум 5 слов!");
     return;
   }
 
   const userSentenceLower = text.toLowerCase();
   const rootLower = (game.currentParsedGer?.root || "").toLowerCase();
   if (!userSentenceLower.includes(rootLower)) {
-    ctx.reply("Fast! Hast du das Wort richtig geschrieben?");
+    ctx.reply("Почти! Правильно ли написано слово?");
     return;
   }
 
-  // Satz passt -> +2
+  // Если предложение корректно, начисляем +2 балла
   game.sentenceSubmissions[userId] = true;
   updateUserPoints(userId, username, 2);
-  ctx.reply(`Sehr gut, ${username}! Du erhältst +2 Punkte.`);
+  ctx.reply(`Отлично, ${username}! Ты получаешь +2 балла за предложение.`);
 });
 
 ////////////////////////////////////////////////////////////
-// Bot starten
+// Запуск бота
 ////////////////////////////////////////////////////////////
 
 bot.launch();
-console.log("Bot gestartet...");
+console.log("Бот запущен...");
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
