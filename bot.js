@@ -201,7 +201,7 @@ bot.command('startgame', (ctx) => {
   // Устанавливаем авто-таймер для запуска нового слова каждые 60 минут
   game.autoInterval = setInterval(() => {
     autoStartGame(chatId);
-  }, 30 * 1000);
+  }, 30 * 30 * 1000);
 });
 
 // Команда для остановки игры /endgame
