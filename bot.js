@@ -21,8 +21,6 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
-const ADMIN_ID = process.env.ADMIN_ID || null;
-
 const bot = new Telegraf(BOT_TOKEN);
 
 ////////////////////////////////////////////////////////////
@@ -48,7 +46,7 @@ try {
 }
 
 ////////////////////////////////////////////////////////////
-// Глобальные баллы для всех пользователей (опционально)
+// Глобальные баллы для всех пользователей
 ////////////////////////////////////////////////////////////
 
 const pointsFile = path.join(__dirname, 'points.json');
@@ -74,7 +72,7 @@ function savePoints() {
 }
 
 ////////////////////////////////////////////////////////////
-// Состояние игры для каждой группы (с добавлением авто-таймера)
+// Состояние игры для каждой группы (с авто-таймером)
 ////////////////////////////////////////////////////////////
 
 const games = {}; // games[chatId] => { roundActive, currentWord, autoInterval, ... }
@@ -108,7 +106,7 @@ function parseGermanWord(ger) {
 }
 
 ////////////////////////////////////////////////////////////
-// Функция нормализации строки (удаляет лишние пробелы и приводит к нижнему регистру)
+// Функция нормализации строки (убирает лишние пробелы и приводит к нижнему регистру)
 ////////////////////////////////////////////////////////////
 
 function normalize(str) {
@@ -121,7 +119,8 @@ function normalize(str) {
 
 function autoStartGame(chatId) {
   const game = ensureGame(chatId);
-
+  console.log("autoStartGame для чата:", chatId);
+  
   // Если раунд уже активен, сообщаем об окончании старого слова
   if (game.roundActive) {
     bot.telegram.sendMessage(chatId, "Время для текущего слова истекло. Переходим к следующему слову.");
@@ -159,28 +158,20 @@ function autoStartGame(chatId) {
 }
 
 ////////////////////////////////////////////////////////////
-// Команды бота
+// Команды бота (любой может включать и выключать игру)
 ////////////////////////////////////////////////////////////
 
-// Запуск игры. После вызова /startgame в группе, будет запущен новый раунд
-// и настроен таймер, который раз в час будет автоматически отправлять новое слово.
+// Команда для запуска игры /startgame
 bot.command('startgame', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
 
-  // Опционально: ограничение команды для админа
-  if (ADMIN_ID && ctx.from.id.toString() !== ADMIN_ID.toString()) {
-    ctx.reply("Только админ может запускать игру.");
-    return;
-  }
-
-  // Если уже был запущен авто-таймер для этой группы, сбрасываем его
+  // Если уже запущен авто-таймер, сбрасываем его
   if (game.autoInterval) {
     clearInterval(game.autoInterval);
     game.autoInterval = null;
   }
 
-  // Запуск нового раунда
   if (game.wordIndex >= words.length) {
     game.wordIndex = 0;
   }
@@ -213,15 +204,10 @@ bot.command('startgame', (ctx) => {
   }, 60 * 60 * 1000);
 });
 
-// Завершение игры в текущей группе (останавливаем раунд и сбрасываем авто-таймер)
+// Команда для остановки игры /endgame
 bot.command('endgame', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
-
-  if (ADMIN_ID && ctx.from.id.toString() !== ADMIN_ID.toString()) {
-    ctx.reply("Только админ может останавливать игру.");
-    return;
-  }
 
   if (game.autoInterval) {
     clearInterval(game.autoInterval);
@@ -238,7 +224,7 @@ bot.command('endgame', (ctx) => {
   ctx.reply("Игра остановлена.");
 });
 
-// Команда для просмотра личного счёта
+// Команда для просмотра личного счёта /score
 bot.command('score', (ctx) => {
   const userId = ctx.from.id;
   const userData = pointsData[userId];
@@ -246,7 +232,7 @@ bot.command('score', (ctx) => {
   ctx.reply(`${ctx.from.first_name}, твой счёт: ${score}`);
 });
 
-// Вывод общего списка баллов
+// Вывод общего списка баллов /scoreall
 bot.command('scoreall', (ctx) => {
   if (Object.keys(pointsData).length === 0) {
     ctx.reply("Пока баллов нет.");
@@ -260,6 +246,7 @@ bot.command('scoreall', (ctx) => {
   ctx.reply(result, { parse_mode: 'Markdown' });
 });
 
+// Команда для вывода лидерборда /leaderboard
 bot.command('leaderboard', (ctx) => {
   if (Object.keys(pointsData).length === 0) {
     ctx.reply("Пока баллов нет.");
@@ -273,15 +260,10 @@ bot.command('leaderboard', (ctx) => {
   ctx.reply(leaderboard, { parse_mode: 'Markdown' });
 });
 
-// Перезапуск игры: сбрасывает состояние для группы и останавливает авто-таймер
+// Команда для перезапуска игры /restartgame
 bot.command('restartgame', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
-
-  if (ADMIN_ID && ctx.from.id.toString() !== ADMIN_ID.toString()) {
-    ctx.reply("Только админ может перезапускать игру.");
-    return;
-  }
 
   if (game.autoInterval) {
     clearInterval(game.autoInterval);
@@ -307,14 +289,14 @@ bot.on('text', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
 
-  // Если нет активного раунда в этой группе, сообщения не обрабатываются
+  // Если в группе нет активного раунда, сообщения не обрабатываются
   if (!game.roundActive) return;
 
   const text = ctx.message.text;
   const userId = ctx.from.id;
   const username = ctx.from.first_name || "Неизвестный";
 
-  // 1) Команда "Aufgabe+"
+  // 1) Обработка команды "Aufgabe+"
   if (text.trim() === "Aufgabe+") {
     if (!game.aufgabeClaimed[userId]) {
       updateUserPoints(userId, username, 3);
@@ -326,10 +308,8 @@ bot.on('text', (ctx) => {
 
   // 2) Проверка перевода слова
   if (!game.firstGuesser) {
-    // Используем normalize() для приведения ответа к стандартному виду
     let userGuess = normalize(text);
     if (game.currentParsedGer?.hasArticle) {
-      // Ожидаемый ответ формируется и нормализуется
       const expected = normalize(`${game.currentParsedGer.article} ${game.currentParsedGer.root}`);
       if (userGuess === expected) {
         game.firstGuesser = { userId, username };
@@ -353,7 +333,6 @@ bot.on('text', (ctx) => {
       }
     }
   } else {
-    // Если слово уже угадано, повторные попытки
     let userGuess = normalize(text);
     let expected;
     if (game.currentParsedGer?.hasArticle) {
@@ -368,10 +347,7 @@ bot.on('text', (ctx) => {
   }
 
   // 3) Проверка предложения (минимум 5 слов и наличие ключевого слова)
-  if (game.sentenceSubmissions[userId]) {
-    // Пользователь уже отправлял предложение
-    return;
-  }
+  if (game.sentenceSubmissions[userId]) return;
 
   const wordsInMessage = text.split(/\s+/).filter(w => w.length > 0);
   if (wordsInMessage.length < 5) {
@@ -379,14 +355,13 @@ bot.on('text', (ctx) => {
     return;
   }
 
-  const userSentenceLower = text.toLowerCase(); // здесь можно оставить простой toLowerCase(), так как мы ищем вхождение
-  const rootLower = game.currentParsedGer?.root.toLowerCase() || "";
+  const userSentenceLower = text.toLowerCase();
+  const rootLower = (game.currentParsedGer?.root || "").toLowerCase();
   if (!userSentenceLower.includes(rootLower)) {
     ctx.reply("Почти! Правильно ли написано слово?");
     return;
   }
 
-  // Если предложение корректно, начисляем +2 балла
   game.sentenceSubmissions[userId] = true;
   updateUserPoints(userId, username, 2);
   ctx.reply(`Отлично, ${username}! Ты получаешь +2 балла за предложение.`);
