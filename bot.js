@@ -219,7 +219,7 @@ bot.command('startgame', (ctx) => {
   // Устанавливаем авто-таймер для нового слова
   game.autoInterval = setInterval(() => {
     autoStartGame(chatId);
-  }, 2 * 60 * 1000);
+  }, 5 * 60 * 1000);
 });
 
 // Команда /endgame – остановка игры
@@ -324,8 +324,10 @@ bot.command('restartgame', (ctx) => {
 
 bot.on('text', (ctx) => {
   const text = ctx.message.text;
-  // Если сообщение содержит русские буквы, бот не отвечает
-  if (/[а-яё]/i.test(text)) {
+  // Игнорируем сообщения, содержащие русские буквы или состоящие только из эмоджи
+  const cyrillicRegex = /[а-яё]/i;
+  const emojiRegex = /^[\p{Emoji}\s]+$/u;
+  if (cyrillicRegex.test(text) || emojiRegex.test(text)) {
     return;
   }
   
@@ -410,11 +412,15 @@ bot.on('text', (ctx) => {
 });
 
 ////////////////////////////////////////////////////////////
-// Запуск бота
+// Запуск бота в polling-режиме (под Render Background Worker)
 ////////////////////////////////////////////////////////////
 
-bot.launch();
-console.log("Бот запущен...");
+(async () => {
+  // Удаляем вебхук, чтобы избежать конфликта
+  await bot.telegram.deleteWebhook();
+  await bot.launch();
+  console.log("Бот запущен...");
+})();
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
