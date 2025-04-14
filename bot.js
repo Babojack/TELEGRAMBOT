@@ -57,7 +57,6 @@ if (fs.existsSync(pointsFile)) {
   }
 }
 
-// Punkte aktualisieren für eine bestimmte Gruppe
 function updateUserPoints(chatId, userId, username, pointsToAdd) {
   if (!pointsData[chatId]) {
     pointsData[chatId] = {};
@@ -164,12 +163,8 @@ function autoStartGame(chatId) {
     bot.telegram.sendMessage(chatId, "Die Zeit ist leider abgelaufen.");
   }
 
-  if (game.wordIndex >= words.length) {
-    game.wordIndex = 0;
-  }
-
-  game.currentWord = words[game.wordIndex];
-  game.wordIndex++;
+  // Выбираем случайное слово
+  game.currentWord = words[Math.floor(Math.random() * words.length)];
   game.currentParsedGer = parseGermanWord(game.currentWord.ger);
 
   game.roundActive = true;
@@ -201,11 +196,8 @@ bot.command('startgame', (ctx) => {
     game.autoInterval = null;
   }
 
-  if (game.wordIndex >= words.length) {
-    game.wordIndex = 0;
-  }
-  game.currentWord = words[game.wordIndex];
-  game.wordIndex++;
+  // Выбираем случайное слово
+  game.currentWord = words[Math.floor(Math.random() * words.length)];
   game.currentParsedGer = parseGermanWord(game.currentWord.ger);
 
   game.roundActive = true;
@@ -276,7 +268,7 @@ bot.command('scoreall', (ctx) => {
   ctx.reply(result, { parse_mode: 'Markdown' });
 });
 
-// Команда /leaderboard – тот же вывод лидерборда
+// Команда /leaderboard – вывод лидерборда
 bot.command('leaderboard', (ctx) => {
   const chatId = ctx.chat.id;
   const groupScores = pointsData[chatId] || {};
@@ -331,13 +323,18 @@ bot.command('restartgame', (ctx) => {
 ////////////////////////////////////////////////////////////
 
 bot.on('text', (ctx) => {
+  const text = ctx.message.text;
+  // Если сообщение содержит русские буквы, бот не отвечает
+  if (/[а-яё]/i.test(text)) {
+    return;
+  }
+  
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
 
   // Если в группе нет активного раунда, сообщения не обрабатываются
   if (!game.roundActive) return;
 
-  const text = ctx.message.text;
   const userId = ctx.from.id;
   const username = ctx.from.first_name || "Неизвестный";
 
