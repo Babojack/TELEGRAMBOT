@@ -44,7 +44,7 @@ try {
 
 ////////////////////////////////////////////////////////////
 // Глобальные баллы – теперь gruppenspezifisch
-// Struktur: { chatId: { userId: { username, points } } }
+// Структура: { chatId: { userId: { username, points } } }
 ////////////////////////////////////////////////////////////
 
 const pointsFile = path.join(__dirname, 'points.json');
@@ -211,7 +211,7 @@ async function autoStartGame(chatId) {
     chatId,
     `Hier ist ein neues Wort: *${game.currentWord.rus}*\n\n` +
       `/rules - um die Regeln zu lesen\n` +
-      `/rulesru - um Regeln auf russisch zu lesen\n`, +
+      `/rulesru - um Regeln auf russisch zu lesen\n` +
       `/score - um Deinen Score zu sehen`,
     { parse_mode: 'Markdown' }
   );
@@ -452,14 +452,54 @@ bot.on('text', (ctx) => {
 });
 
 ////////////////////////////////////////////////////////////
+// Диагностические функции: логирование состояния webhook
+////////////////////////////////////////////////////////////
+
+// Функция для получения и логирования информации о webhook
+async function logWebhookInfo() {
+  try {
+    const info = await bot.telegram.getWebhookInfo();
+    if (info.url) {
+      console.log("⚠️ Обнаружен активный webhook:", info);
+    } else {
+      console.log("✅ webhook не активен:", info);
+    }
+  } catch (error) {
+    console.error("Ошибка при получении webhook info:", error);
+  }
+}
+
+// Логирование webhook info каждые 60 секунд
+setInterval(logWebhookInfo, 60 * 1000);
+
+// Команда для вывода статуса webhook в чате (для диагностики)
+bot.command('status', async (ctx) => {
+  try {
+    const info = await bot.telegram.getWebhookInfo();
+    await ctx.replyWithMarkdown("Статус webhook:\n```\n" + JSON.stringify(info, null, 2) + "\n```");
+  } catch (error) {
+    await ctx.reply("Ошибка при получении webhook info: " + error.message);
+  }
+});
+
+////////////////////////////////////////////////////////////
 // Запуск бота в polling-режиме (для Render Background Worker)
 ////////////////////////////////////////////////////////////
 
 (async () => {
-  // Удаляем вебхук, чтобы избежать конфликта
+  try {
+    const initialInfo = await bot.telegram.getWebhookInfo();
+    console.log("Первоначальный статус webhook:", initialInfo);
+  } catch (error) {
+    console.error("Ошибка при получении первоначального webhook info:", error);
+  }
+
+  // Удаляем webhook, если он установлен
   await bot.telegram.deleteWebhook();
+  console.log("Webhook удалён, запускаем polling...");
+
   await bot.launch();
-  console.log("Бот запущен...");
+  console.log("Бот запущен!");
 })();
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
