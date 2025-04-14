@@ -35,10 +35,7 @@ try {
     .filter(line => line.trim() !== '')
     .map(line => {
       const [rus, ger] = line.split(':');
-      return {
-        rus: rus.trim(),
-        ger: ger.trim()
-      };
+      return { rus: rus.trim(), ger: ger.trim() };
     });
 } catch (err) {
   console.error("Ошибка при чтении файла words.txt:", err);
@@ -46,7 +43,8 @@ try {
 }
 
 ////////////////////////////////////////////////////////////
-// Глобальные баллы для всех пользователей
+// Глобальные баллы – теперь gruppenspezifisch
+// Struktur: { chatId: { userId: { username, points } } }
 ////////////////////////////////////////////////////////////
 
 const pointsFile = path.join(__dirname, 'points.json');
@@ -59,11 +57,15 @@ if (fs.existsSync(pointsFile)) {
   }
 }
 
-function updateUserPoints(userId, username, pointsToAdd) {
-  if (!pointsData[userId]) {
-    pointsData[userId] = { username, points: 0 };
+// Punkte aktualisieren für eine bestimmte Gruppe
+function updateUserPoints(chatId, userId, username, pointsToAdd) {
+  if (!pointsData[chatId]) {
+    pointsData[chatId] = {};
   }
-  pointsData[userId].points += pointsToAdd;
+  if (!pointsData[chatId][userId]) {
+    pointsData[chatId][userId] = { username, points: 0 };
+  }
+  pointsData[chatId][userId].points += pointsToAdd;
   savePoints();
 }
 
@@ -87,7 +89,8 @@ function ensureGame(chatId) {
       sentenceSubmissions: {},
       aufgabeClaimed: {},
       wordIndex: 0,
-      autoInterval: null // Таймер для автоматического запуска раундов в этой группе
+      autoInterval: null, // Таймер для автоматического запуска раундов
+      rulesShown: false
     };
   }
   return games[chatId];
@@ -114,16 +117,51 @@ function normalize(str) {
 }
 
 ////////////////////////////////////////////////////////////
-// Функция автостарта нового раунда в конкретной группе
+// Полный текст правил (будет выводиться один раз при запуске игры)
+////////////////////////////////////////////////////////////
+
+const RULES_TEXT = `So ihr Lieben! In den nächsten 24 Stunden bekommt ihr 24 Wörter, die ihr heute lernen werdet. Aber ihr könnt dabei auch Punkte sammeln.
+
+1️⃣ Der Erste, der das Wort richtig übersetzt, bekommt +1 Punkt.
+2️⃣ Danach könnt ihr – alle unabhängig voneinander – einen richtigen Satz mit dem Wort bilden und dafür +2 Punkte bekommen.
+3️⃣ Wenn ihr 'Aufgabe+' schreibt, bekommt ihr +3 Punkte (dafür müsst ihr das Wort 4x in echten Gesprächen und 4x schriftlich (WhatsApp, Telegram etc. benutzen!).
+
+📌 WICHTIG: Beim Schreiben eurer Sätze bitte auf die Grammatik achten!
+Hier sind ein paar goldene Regeln, die euch helfen:
+
+📚 DIE GOLDENEN GRAMMATIK-REGELN:
+➤ Immer den richtigen Artikel benutzen! Beispiel:
+   ✘ Haus (falsch!)
+   ✔️ das Haus (richtig!)
+
+➤ Manche Präpositionen verlangen bestimmte Fälle:
+   • mit → Dativ → z. B. „mit dem Auto“, „mit der Sonne“
+   • für → Akkusativ → z. B. „für das Kind“, „für die Katze“
+   • von → Dativ → „von dem Mann“, „von der Frau“
+   • ohne → Akkusativ → „ohne einen Plan“, „ohne die Jacke“
+
+➤ Ein Satz sollte mindestens 5 Wörter haben!
+   ✘ 'Ich liebe Haus' (zu kurz & grammatikalisch falsch)
+   ✔️ 'Ich liebe das Haus in unserer Straße.'
+
+➤ Großschreibung! Alle Nomen im Deutschen schreibt man groß:
+   ✔️ „Ich habe einen Hund.“ (nicht: „einen hund“)
+
+🧠 Denk dran: Dein Ziel ist nicht nur Punkte zu sammeln – sondern am Ende richtiges, echtes Deutsch zu sprechen 💪
+
+Viel Erfolg und viel Spaß beim Deutschlernen! 🇩🇪✨`;
+
+////////////////////////////////////////////////////////////
+// Функция автостарта нового раунда в конкретной группе – для последующих раундов
 ////////////////////////////////////////////////////////////
 
 function autoStartGame(chatId) {
   const game = ensureGame(chatId);
   console.log("autoStartGame для чата:", chatId);
   
-  // Если раунд уже активен, сообщаем об окончании старого слова
+  // Если раунд активен – время истекло
   if (game.roundActive) {
-    bot.telegram.sendMessage(chatId, "Время для текущего слова истекло. Переходим к следующему слову.");
+    bot.telegram.sendMessage(chatId, "Die Zeit ist leider abgelaufen.");
   }
 
   if (game.wordIndex >= words.length) {
@@ -139,34 +177,25 @@ function autoStartGame(chatId) {
   game.sentenceSubmissions = {};
   game.aufgabeClaimed = {};
 
-  // Объявление нового раунда
   bot.telegram.sendMessage(
     chatId,
-    "Новое слово!\n\n" +
-    "В течение следующих 24 часов вы получите 24 слова для изучения. " +
-    "Первый, кто правильно переведёт слово, получит +1 балл, а за составление правильного предложения – +2 балла.\n\n" +
-    "Удачи!"
-  );
-
-  bot.telegram.sendMessage(
-    chatId,
-    `⚡️ *Новый раунд!*\n` +
-    `📝 Слово на русском: *${game.currentWord.rus}*\n` +
-    `\nПожалуйста, переведите это слово на немецкий! 🚀`,
+    `Hier ist ein neues Wort: *${game.currentWord.rus}*\n\n` +
+    `/regeln - um die Regeln zu lesen\n` +
+    `/score - um Deinen Score zu sehen`,
     { parse_mode: 'Markdown' }
   );
 }
 
 ////////////////////////////////////////////////////////////
-// Команды бота (любой может включать и выключать игру)
+// Команды бота
 ////////////////////////////////////////////////////////////
 
-// Команда для запуска игры /startgame
+// Команда /startgame – запуск игры с выводом полного текста правил
 bot.command('startgame', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
 
-  // Если уже запущен авто-таймер, сбрасываем его
+  // Если авто-таймер уже запущен, сбрасываем его
   if (game.autoInterval) {
     clearInterval(game.autoInterval);
     game.autoInterval = null;
@@ -183,28 +212,25 @@ bot.command('startgame', (ctx) => {
   game.firstGuesser = null;
   game.sentenceSubmissions = {};
   game.aufgabeClaimed = {};
+  game.rulesShown = false;
 
+  // Вывод правил (только один раз в начале игры)
+  ctx.reply(RULES_TEXT, { parse_mode: 'Markdown' });
   ctx.reply(
-    "В течение следующих 24 часов вы будете получать 24 слова для изучения языка. " +
-    "Правильный перевод слова даёт +1 балл, а составление корректного предложения – +2 балла. " +
-    "При вводе 'Aufgabe+' вы получаете +3 балла.\n\n" +
-    "Удачи!"
-  );
-
-  ctx.reply(
-    `⚡️ *Новый раунд!*\n` +
-    `📝 Слово на русском: *${game.currentWord.rus}*\n` +
-    `\nПожалуйста, переведите это слово на немецкий! 🚀`,
+    `⚡️ *Neuer Rund!*\n` +
+    `📝 Wort auf Russisch: *${game.currentWord.rus}*\n` +
+    `\nBitte übersetze das Wort ins Deutsche! 🚀`,
     { parse_mode: 'Markdown' }
   );
+  game.rulesShown = true;
 
-  // Устанавливаем авто-таймер для запуска нового слова каждые 60 минут
+  // Устанавливаем авто-таймер для нового слова
   game.autoInterval = setInterval(() => {
     autoStartGame(chatId);
   }, 30 * 30 * 1000);
 });
 
-// Команда для остановки игры /endgame
+// Команда /endgame – остановка игры
 bot.command('endgame', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
@@ -224,43 +250,62 @@ bot.command('endgame', (ctx) => {
   ctx.reply("Игра остановлена.");
 });
 
-// Команда для просмотра личного счёта /score
+// Команда /score – вывод личного счёта в текущей группе
 bot.command('score', (ctx) => {
+  const chatId = ctx.chat.id;
   const userId = ctx.from.id;
-  const userData = pointsData[userId];
+  const groupScores = pointsData[chatId] || {};
+  const userData = groupScores[userId];
   const score = userData ? userData.points : 0;
   ctx.reply(`${ctx.from.first_name}, твой счёт: ${score}`);
 });
 
-// Вывод общего списка баллов /scoreall
+// Команда /scoreall – вывод общего списка баллов в текущей группе
 bot.command('scoreall', (ctx) => {
-  if (Object.keys(pointsData).length === 0) {
+  const chatId = ctx.chat.id;
+  const groupScores = pointsData[chatId] || {};
+  if (Object.keys(groupScores).length === 0) {
     ctx.reply("Пока баллов нет.");
     return;
   }
   let result = "📊 *Счёт всех участников:*\n\n";
-  const sorted = Object.entries(pointsData).sort((a, b) => b[1].points - a[1].points);
+  const sorted = Object.entries(groupScores).sort((a, b) => b[1].points - a[1].points);
   sorted.forEach(([id, data], idx) => {
     result += `${idx + 1}. ${data.username}: ${data.points} баллов\n`;
   });
   ctx.reply(result, { parse_mode: 'Markdown' });
 });
 
-// Команда для вывода лидерборда /leaderboard
+// Команда /leaderboard – тот же вывод лидерборда
 bot.command('leaderboard', (ctx) => {
-  if (Object.keys(pointsData).length === 0) {
+  const chatId = ctx.chat.id;
+  const groupScores = pointsData[chatId] || {};
+  if (Object.keys(groupScores).length === 0) {
     ctx.reply("Пока баллов нет.");
     return;
   }
   let leaderboard = "🏆 *Лидерборд:*\n\n";
-  const sorted = Object.entries(pointsData).sort((a, b) => b[1].points - a[1].points);
+  const sorted = Object.entries(groupScores).sort((a, b) => b[1].points - a[1].points);
   sorted.forEach(([id, data], idx) => {
     leaderboard += `${idx + 1}. ${data.username}: ${data.points} баллов\n`;
   });
   ctx.reply(leaderboard, { parse_mode: 'Markdown' });
 });
 
-// Команда для перезапуска игры /restartgame
+// Команда /regeln – вывод полных правил игры
+bot.command('regeln', (ctx) => {
+  ctx.reply(RULES_TEXT, { parse_mode: 'Markdown' });
+});
+
+// Команда /resetscoreall – сброс всех баллов только в текущей группе
+bot.command('resetscoreall', (ctx) => {
+  const chatId = ctx.chat.id;
+  pointsData[chatId] = {};
+  savePoints();
+  ctx.reply("Alle Punkte in dieser Gruppe wurden zurückgesetzt.");
+});
+
+// Команда /restartgame – перезапуск игры (баллы сохраняются)
 bot.command('restartgame', (ctx) => {
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
@@ -282,7 +327,7 @@ bot.command('restartgame', (ctx) => {
 });
 
 ////////////////////////////////////////////////////////////
-// Обработка текстовых сообщений – основная логика игры
+// Обработка текстовых сообщений – логика игры
 ////////////////////////////////////////////////////////////
 
 bot.on('text', (ctx) => {
@@ -299,7 +344,7 @@ bot.on('text', (ctx) => {
   // 1) Обработка команды "Aufgabe+"
   if (text.trim() === "Aufgabe+") {
     if (!game.aufgabeClaimed[userId]) {
-      updateUserPoints(userId, username, 3);
+      updateUserPoints(chatId, userId, username, 3);
       game.aufgabeClaimed[userId] = true;
       ctx.reply(`Отлично, ${username}! Ты получаешь +3 балла за Aufgabe+. 🔥`);
     }
@@ -313,7 +358,7 @@ bot.on('text', (ctx) => {
       const expected = normalize(`${game.currentParsedGer.article} ${game.currentParsedGer.root}`);
       if (userGuess === expected) {
         game.firstGuesser = { userId, username };
-        updateUserPoints(userId, username, 1);
+        updateUserPoints(chatId, userId, username, 1);
         ctx.reply(`Отлично, ${username}! Ты первый и получаешь +1 балл.`);
         return;
       } else {
@@ -324,7 +369,7 @@ bot.on('text', (ctx) => {
       const expected = normalize(game.currentParsedGer.root);
       if (userGuess === expected) {
         game.firstGuesser = { userId, username };
-        updateUserPoints(userId, username, 1);
+        updateUserPoints(chatId, userId, username, 1);
         ctx.reply(`Отлично, ${username}! Ты первый и получаешь +1 балл.`);
         return;
       } else {
@@ -363,7 +408,7 @@ bot.on('text', (ctx) => {
   }
 
   game.sentenceSubmissions[userId] = true;
-  updateUserPoints(userId, username, 2);
+  updateUserPoints(chatId, userId, username, 2);
   ctx.reply(`Отлично, ${username}! Ты получаешь +2 балла за предложение.`);
 });
 
