@@ -219,7 +219,7 @@ bot.command('startgame', (ctx) => {
   // Устанавливаем авто-таймер для нового слова
   game.autoInterval = setInterval(() => {
     autoStartGame(chatId);
-  }, 30 * 30 * 1000);
+  }, 1 * 1 * 1000);
 });
 
 // Команда /endgame – остановка игры
@@ -322,12 +322,14 @@ bot.command('restartgame', (ctx) => {
 // Обработка текстовых сообщений – логика игры
 ////////////////////////////////////////////////////////////
 
-bot.on('text', (ctx) => {
-  const text = ctx.message.text;
-  // Если сообщение содержит русские буквы, бот не отвечает
-  if (/[а-яё]/i.test(text)) {
-    return;
-  }
+bot.on('text', (ctx) => {// Игнорируем сообщения на русском или состоящие из эмоджи
+const cyrillicRegex = /[а-яё]/i;
+const onlyEmojis = /^[\p{Emoji}\s]+$/u;
+
+if (cyrillicRegex.test(text) || onlyEmojis.test(text)) {
+  return;
+}
+
   
   const chatId = ctx.chat.id;
   const game = ensureGame(chatId);
