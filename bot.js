@@ -251,7 +251,7 @@ bot.command('startgame', (ctx) => {
 
   game.autoInterval = setInterval(() => {
     autoStartGame(chatId);
-  }, 1 * 60 * 1000);
+  }, 1 * 5 * 1000);
 });
 
 // /endgame – игра остановлена
