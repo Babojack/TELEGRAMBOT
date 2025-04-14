@@ -219,7 +219,7 @@ bot.command('startgame', (ctx) => {
   // Устанавливаем авто-таймер для нового слова
   game.autoInterval = setInterval(() => {
     autoStartGame(chatId);
-  }, 2 * 2 * 1000);
+  }, 2 * 60 * 1000);
 });
 
 // Команда /endgame – остановка игры
